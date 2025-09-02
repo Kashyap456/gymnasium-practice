@@ -5,8 +5,9 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "gymnasium[classic-control]>=1.2.0",
+    "gymnasium[box2d,classic-control]>=1.2.0",
     "matplotlib>=3.10.6",
+    "swig>=4.3.1.post0",
     "torch>=2.8.0",
     "tqdm>=4.67.1",
 ]
