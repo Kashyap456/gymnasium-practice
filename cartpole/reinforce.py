@@ -14,40 +14,39 @@ from tqdm import tqdm
 
 STATE_SIZE = 4
 ACTION_SIZE = 2
-HIDDEN_SIZE = 128
+HIDDEN_SIZE = 32
 
 
 class DQN(nn.Module):
     def __init__(self):
         super(DQN, self).__init__()
         self.fc1 = nn.Linear(STATE_SIZE, HIDDEN_SIZE)
-        self.fc2 = nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE)
-        self.fc3 = nn.Linear(HIDDEN_SIZE, ACTION_SIZE)
+        self.fc2 = nn.Linear(HIDDEN_SIZE, ACTION_SIZE)
 
     def forward(self, states):
         states = F.relu(self.fc1(states))
-        states = F.relu(self.fc2(states))
-        return self.fc3(states)
+        states = self.fc2(states)
+        return F.softmax(states, dim=0)
 
 
 device = torch.device("mps")
 
-GAMMA = 0.99
-LR = 3e-4
+GAMMA = 0.95
+LR = 5e-4
 
 env = gym.make("CartPole-v1")
 rnet = DQN().to(device)
 
 # why AdamW? what is amsgrad
-optimizer = optim.AdamW(rnet.parameters(), lr=LR, amsgrad=True)
+optimizer = optim.Adam(rnet.parameters(), lr=LR)
 
 log_probs = []
 rewards = []
 
 
 def select_action(state):
-    logits = rnet(state)
-    action_dist = torch.distributions.Categorical(logits=logits)
+    probs = rnet(state)
+    action_dist = torch.distributions.Categorical(probs)
     action = action_dist.sample()
     log_prob = action_dist.log_prob(action)
     log_probs.append(log_prob)
@@ -87,11 +86,16 @@ def compute_returns():
 
 def optimize_model():
     returns = compute_returns()
-    returns = (returns - returns.mean()) / (returns.std() + 1e-10)
+    std, mean = torch.std_mean(returns, unbiased=False)
+    returns = (returns - mean) / (std + 1e-8)
+
     loss = -(torch.stack(log_probs) * returns).sum()
+
     optimizer.zero_grad()
     loss.backward()
+    torch.nn.utils.clip_grad_norm_(rnet.parameters(), 1.0)
     optimizer.step()
+
     log_probs.clear()
     rewards.clear()
 
@@ -100,12 +104,12 @@ truncated_count = 0
 TRUNCATED_THRESHOLD = 10
 
 rnet.train()
-num_episodes = 10000
+num_episodes = 2000
 for i_episode in tqdm(range(num_episodes)):
     state, info = env.reset()
     # (Question) - why unsqueeze here
     state = torch.tensor(state, dtype=torch.float32,
-                         device=device).unsqueeze(0)
+                         device=device)
 
     for t in count():
         action = select_action(state)
@@ -114,7 +118,7 @@ for i_episode in tqdm(range(num_episodes)):
         if terminated or truncated:
             break
         state = torch.tensor(next_state, dtype=torch.float32,
-                             device=device).unsqueeze(0)
+                             device=device)
 
     if truncated:
         truncated_count += 1
